@@ -3,8 +3,13 @@ server:
 
 payflow:
   consistency:
-    # naive = dual write (baseline); outbox = transactional outbox (next step)
+    # naive = dual write (baseline); outbox = transactional outbox. Override with PAYFLOW_CONSISTENCY_STRATEGY.
     strategy: naive
+  outbox:
+    poll-interval: 50ms
+    batch-size: 100
+    send-timeout: 10s
+    retention: 1h
 
 spring:
   application:

@@ -19,6 +19,10 @@
             <artifactId>payflow-events</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.payflow</groupId>
+            <artifactId>payflow-outbox</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>

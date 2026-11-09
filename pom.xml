@@ -20,6 +20,7 @@
 
     <modules>
         <module>payflow-events</module>
+        <module>payflow-outbox</module>
         <module>wallet-service</module>
         <module>transaction-service</module>
     </modules>
@@ -34,6 +35,11 @@
             <dependency>
                 <groupId>com.payflow</groupId>
                 <artifactId>payflow-events</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.payflow</groupId>
+                <artifactId>payflow-outbox</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

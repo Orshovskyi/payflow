@@ -7,10 +7,13 @@
 | Модуль | Порт | Відповідальність |
 |---|---|---|
 | `payflow-events` | — | Контракти подій Kafka (`TransferRequested`, `TransferCompleted`, `TransferFailed`) |
+| `payflow-outbox` | — | Transactional Outbox: `OutboxWriter` і polling-relay (автоконфігурація для стратегії `outbox`) |
 | `wallet-service` | 8081 | Гаманці та баланси (PostgreSQL `wallet_db`, оптимістичне блокування); виконує перекази |
 | `transaction-service` | 8082 | Перекази / стан саги (PostgreSQL `transaction_db`) |
 
-Стратегія консистентності задається властивістю `payflow.consistency.strategy` (зараз реалізовано `naive`).
+Стратегія консистентності задається властивістю `payflow.consistency.strategy`: `naive` (за замовчуванням) або
+`outbox`. Наприклад: `PAYFLOW_CONSISTENCY_STRATEGY=outbox ./mvnw -pl wallet-service spring-boot:run`.
+Обидва сервіси мають працювати з однією стратегією.
 
 ## Що потрібно
 - JDK 21 (на нього має вказувати `JAVA_HOME`)
