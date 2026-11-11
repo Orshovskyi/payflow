@@ -3,3 +3,6 @@ target/
 *.iml
 .DS_Store
 *.log
+
+# Experiment output (Gatling reports are large; summary.csv is the data for the thesis)
+experiments/results/*/

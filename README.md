@@ -21,7 +21,7 @@
 
 ## Запуск
 ```bash
-docker compose up -d          # PostgreSQL, Kafka, Prometheus (:9090), Grafana (:3000, admin/admin)
+docker compose up -d          # лише інфраструктура: PostgreSQL, Kafka, Prometheus (:9090), Grafana (:3000, admin/admin)
 ./mvnw verify                 # юніт-тести та інтеграційні тести на Testcontainers
 ./mvnw -pl wallet-service spring-boot:run
 ./mvnw -pl transaction-service spring-boot:run
@@ -37,6 +37,14 @@ curl localhost:8082/api/v1/transfers/<transferId>     # PENDING -> COMPLETED | F
 ```
 - Swagger UI: http://localhost:8081/swagger-ui/index.html
 - Метрики: http://localhost:8081/actuator/prometheus
+
+## Експерименти
+```bash
+BUILD=1 experiments/run-experiment.sh naive 50 120
+BUILD=1 experiments/run-experiment.sh outbox 50 120
+```
+Сервіси працюють у контейнерах з однаковими лімітами; результати потрапляють у `experiments/results/summary.csv`,
+графіки — у Grafana (дашборд **PayFlow · Experiment**). Деталі — [`experiments/README.md`](experiments/README.md).
 
 ## Документація
 - Архітектурні рішення: [`docs/adr`](docs/adr)

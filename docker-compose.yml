@@ -1,10 +1,26 @@
-# Local infrastructure for PayFlow. Services run from the IDE for now;
-# they will be added here once their images are built.
+# PayFlow environment.
+#   docker compose up -d                  infrastructure only (run the services from the IDE)
+#   docker compose --profile app up -d    infrastructure + services in containers (experiments)
+# Experiment parameters come from environment variables: STRATEGY (naive|outbox), OUTBOX_POLL_INTERVAL.
+# Resource limits are fixed so that every run gets exactly the same CPU and memory.
 name: payflow
+
+x-service: &service
+  profiles: ["app"]
+  restart: "no"
+  cpus: 2
+  mem_limit: 768m
+  depends_on:
+    postgres:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
 
 services:
   postgres:
     image: postgres:16-alpine
+    cpus: 2
+    mem_limit: 1g
     environment:
       POSTGRES_USER: payflow
       POSTGRES_PASSWORD: payflow
@@ -22,6 +38,8 @@ services:
 
   kafka:
     image: apache/kafka:3.9.1
+    cpus: 2
+    mem_limit: 1g
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -44,14 +62,42 @@ services:
       timeout: 10s
       retries: 10
 
+  wallet-service:
+    <<: *service
+    image: payflow/wallet-service:latest
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        MODULE: wallet-service
+    environment: &service-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet_db
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      PAYFLOW_CONSISTENCY_STRATEGY: ${STRATEGY:-naive}
+      PAYFLOW_OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-50ms}
+    ports:
+      - "8081:8081"
+
+  transaction-service:
+    <<: *service
+    image: payflow/transaction-service:latest
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        MODULE: transaction-service
+    environment:
+      <<: *service-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/transaction_db
+    ports:
+      - "8082:8082"
+
   prometheus:
     image: prom/prometheus:v3.5.0
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   grafana:
     image: grafana/grafana:12.1.0
@@ -62,6 +108,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:

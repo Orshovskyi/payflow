@@ -1,12 +1,15 @@
 global:
   scrape_interval: 5s
 
+# Scrapes the containerised services (docker compose --profile app).
+# host.docker.internal is deliberately not listed: with port mapping it reaches the same containers, every series
+# would be collected twice, and sums in experiment queries would double.
 scrape_configs:
   - job_name: wallet-service
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["host.docker.internal:8081"]
+      - targets: ["wallet-service:8081"]
   - job_name: transaction-service
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["host.docker.internal:8082"]
+      - targets: ["transaction-service:8082"]

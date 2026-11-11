@@ -1,0 +1,4 @@
+# Only the built jars are needed in the build context.
+**
+!wallet-service/target/wallet-service-*.jar
+!transaction-service/target/transaction-service-*.jar
