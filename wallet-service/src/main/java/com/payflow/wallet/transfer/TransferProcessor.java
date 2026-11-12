@@ -1,5 +1,6 @@
 package com.payflow.wallet.transfer;
 
+import com.payflow.chaos.CrashPoint;
 import com.payflow.events.TransferCompleted;
 import com.payflow.events.TransferFailed;
 import com.payflow.events.TransferFailed.FailureReason;
@@ -33,17 +34,19 @@ public class TransferProcessor {
     private final AppliedTransfers appliedTransfers;
     private final TransferResultPublisher resultPublisher;
     private final MeterRegistry meterRegistry;
+    private final CrashPoint crashPoint;
     private final String strategy;
 
     public TransferProcessor(WalletRepository walletRepository, ProcessedMessages processedMessages,
                              AppliedTransfers appliedTransfers, TransferResultPublisher resultPublisher,
-                             MeterRegistry meterRegistry,
+                             MeterRegistry meterRegistry, CrashPoint crashPoint,
                              @Value("${payflow.consistency.strategy}") String strategy) {
         this.walletRepository = walletRepository;
         this.processedMessages = processedMessages;
         this.appliedTransfers = appliedTransfers;
         this.resultPublisher = resultPublisher;
         this.meterRegistry = meterRegistry;
+        this.crashPoint = crashPoint;
         this.strategy = strategy;
     }
 
@@ -60,6 +63,7 @@ public class TransferProcessor {
         }
         TransferResult result = execute(request);
         appliedTransfers.record(request, result);
+        crashPoint.afterCommit(); // experiments only: no-op unless armed
         meterRegistry.counter("payflow.wallet.transfers.processed",
                 "strategy", strategy, "outcome", result.getClass().getSimpleName()).increment();
         resultPublisher.publish(result);

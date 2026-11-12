@@ -31,6 +31,8 @@ public class TransferMetrics {
                 .tag("strategy", strategy)
                 .tag("outcome", outcome)
                 .publishPercentileHistogram()
+                // Default upper bound is 30 s; transfers delayed by a crash take longer and would be clipped.
+                .maximumExpectedValue(Duration.ofMinutes(2))
                 .register(registry)
                 .record(Duration.between(createdAt, Instant.now()));
     }

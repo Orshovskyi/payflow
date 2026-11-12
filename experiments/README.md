@@ -10,6 +10,20 @@ OUTBOX_POLL_INTERVAL=10ms experiments/run-experiment.sh outbox 50 120
 `BUILD=1` збирає jar-файли й образи; потрібен після кожної зміни коду. `LABEL="..."` додає довільну позначку до
 рядка результатів.
 
+## Chaos-прогони
+```bash
+CHAOS_MODE=crash-after-commit CHAOS_TARGET=wallet-service experiments/run-experiment.sh naive 50 100
+CHAOS_MODE=crash-after-commit CHAOS_TARGET=wallet-service experiments/run-experiment.sh outbox 50 100
+CHAOS_MODE=kill CHAOS_TARGET=transaction-service experiments/run-experiment.sh naive 50 100
+```
+- `CHAOS_MODE`: `kill` (SIGKILL у довільний момент) або `crash-after-commit` (падіння одразу після commit).
+- `CHAOS_TARGET`: `wallet-service` або `transaction-service`.
+- `CHAOS_EVENTS` (3), `CHAOS_FIRST_AT` (20 с від початку заміру), `CHAOS_INTERVAL` (30 с).
+
+Тривалість заміру має покривати всі події: `CHAOS_FIRST_AT + (CHAOS_EVENTS − 1) × CHAOS_INTERVAL` плюс ~15 с
+на відновлення. Час кожної події — у `chaos.log`. Обґрунтування режимів — в
+[ADR-0007](../docs/adr/0007-chaos-experiments.md).
+
 ## Звірка коректності
 ```bash
 python3 -I experiments/reconcile.py              # звіт для запущеного стеку; код виходу 1, якщо є розбіжності

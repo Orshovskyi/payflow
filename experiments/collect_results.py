@@ -77,8 +77,10 @@ def reconciliation(run_dir):
 def main():
     p = argparse.ArgumentParser()
     for name in ["run-dir", "run-id", "strategy", "rate", "duration", "poll-interval", "start", "end",
-                 "total-before", "total-after", "new-money", "pending", "commit", "label", "gatling-exit"]:
-        p.add_argument("--" + name, required=name != "label", default="")
+                 "total-before", "total-after", "new-money", "pending", "commit", "label", "gatling-exit",
+                 "chaos-mode", "chaos-target", "chaos-events-done"]:
+        p.add_argument("--" + name, required=name not in ("label", "chaos-mode", "chaos-target", "chaos-events-done"),
+                       default="")
     a = p.parse_args()
 
     window = f"{int(a.end) - int(a.start)}s"
@@ -103,6 +105,9 @@ def main():
     summary = {
         "run_id": a.run_id, "commit": a.commit, "label": a.label,
         "strategy": a.strategy, "outbox_poll_interval": a.poll_interval if a.strategy == "outbox" else "",
+        "chaos_mode": a.chaos_mode or "none",
+        "chaos_target": a.chaos_target if a.chaos_mode not in ("", "none") else "",
+        "chaos_events": int(a.chaos_events_done or 0),
         "target_rate": int(a.rate), "duration_s": int(a.duration), "measured_window_s": int(a.end) - int(a.start),
         "gatling_exit_code": int(a.gatling_exit),
         **gatling_stats(a.run_dir),

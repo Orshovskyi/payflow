@@ -7,6 +7,8 @@ name: payflow
 
 x-service: &service
   profiles: ["app"]
+  # Never restarted by Docker: in chaos runs the experiment script restarts a crashed service itself,
+  # so the downtime is the same for every run.
   restart: "no"
   cpus: 2
   mem_limit: 768m
@@ -75,6 +77,7 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       PAYFLOW_CONSISTENCY_STRATEGY: ${STRATEGY:-naive}
       PAYFLOW_OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-50ms}
+      PAYFLOW_CHAOS_ENABLED: ${CHAOS_ENABLED:-false}
     ports:
       - "8081:8081"
 

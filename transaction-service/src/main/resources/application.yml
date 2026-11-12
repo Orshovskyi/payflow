@@ -42,6 +42,10 @@ spring:
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.payflow.events
         spring.json.use.type.headers: false
+        # Default is 45 s: after a crash the partitions of the dead consumer stay blocked that long.
+        # 6 s is the broker minimum; it applies to both strategies, so it shortens recovery without biasing them.
+        session.timeout.ms: 6000
+        heartbeat.interval.ms: 2000
     listener:
       concurrency: 3
 
