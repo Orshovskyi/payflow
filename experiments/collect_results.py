@@ -2,6 +2,7 @@
 
 Sources:
   * database (passed in by the shell script) - exact counts and the money-conservation invariant;
+  * reconciliation.json (written by reconcile.py) - per-transfer consistency between the two services;
   * Prometheus - end-to-end saga latency percentiles and anomaly counters over the measured window;
   * Gatling console summary (gatling.log) - HTTP latency percentiles, throughput and errors as seen by the client.
     Gatling 3.12+ no longer writes stats.json and its simulation.log is binary, so the printed summary is parsed.
@@ -65,6 +66,14 @@ def gatling_stats(run_dir):
     return stats
 
 
+def reconciliation(run_dir):
+    path = os.path.join(run_dir, "reconciliation.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return {"recon_" + key: value for key, value in json.load(f).items()}
+
+
 def main():
     p = argparse.ArgumentParser()
     for name in ["run-dir", "run-id", "strategy", "rate", "duration", "poll-interval", "start", "end",
@@ -106,6 +115,7 @@ def main():
         "transfers_failed": statuses.get("FAILED", 0),
         "transfers_pending_after_drain": int(a.pending),
         "money_conserved": Decimal(a.total_after) == expected_total,
+        **reconciliation(a.run_dir),
         "total_balance_expected": str(expected_total), "total_balance_actual": a.total_after,
         # Anomalies inside the measured window (Prometheus increase() is extrapolated, so values are approximate).
         "naive_publish_failures": increase("payflow_events_publish_failed_total"),

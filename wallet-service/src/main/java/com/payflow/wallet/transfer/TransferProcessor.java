@@ -20,8 +20,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Saga step 2: executes a requested transfer. Debit, credit and the deduplication marker are committed in one
- * local transaction, so the transfer is applied either completely or not at all, and at most once.
+ * Saga step 2: executes a requested transfer. Debit, credit, the deduplication marker and the journal entry are
+ * committed in one local transaction, so the transfer is applied either completely or not at all, and at most once.
  */
 @Service
 public class TransferProcessor {
@@ -30,15 +30,18 @@ public class TransferProcessor {
 
     private final WalletRepository walletRepository;
     private final ProcessedMessages processedMessages;
+    private final AppliedTransfers appliedTransfers;
     private final TransferResultPublisher resultPublisher;
     private final MeterRegistry meterRegistry;
     private final String strategy;
 
     public TransferProcessor(WalletRepository walletRepository, ProcessedMessages processedMessages,
-                             TransferResultPublisher resultPublisher, MeterRegistry meterRegistry,
+                             AppliedTransfers appliedTransfers, TransferResultPublisher resultPublisher,
+                             MeterRegistry meterRegistry,
                              @Value("${payflow.consistency.strategy}") String strategy) {
         this.walletRepository = walletRepository;
         this.processedMessages = processedMessages;
+        this.appliedTransfers = appliedTransfers;
         this.resultPublisher = resultPublisher;
         this.meterRegistry = meterRegistry;
         this.strategy = strategy;
@@ -56,6 +59,7 @@ public class TransferProcessor {
             return;
         }
         TransferResult result = execute(request);
+        appliedTransfers.record(request, result);
         meterRegistry.counter("payflow.wallet.transfers.processed",
                 "strategy", strategy, "outcome", result.getClass().getSimpleName()).increment();
         resultPublisher.publish(result);

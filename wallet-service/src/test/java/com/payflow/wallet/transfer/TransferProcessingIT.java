@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 
@@ -45,6 +46,9 @@ class TransferProcessingIT {
     @Autowired
     private ResultCollector results;
 
+    @Autowired
+    private JdbcTemplate journal;
+
     @Test
     void successfulTransferMovesMoneyAndReportsCompletion() {
         UUID source = wallet("100.00");
@@ -57,6 +61,7 @@ class TransferProcessingIT {
         assertThat(result).isInstanceOf(TransferCompleted.class);
         assertThat(balance(source)).isEqualByComparingTo("70.00");
         assertThat(balance(target)).isEqualByComparingTo("30.00");
+        assertThat(journalOutcomes(request.transferId())).containsExactly("COMPLETED");
     }
 
     @Test
@@ -72,6 +77,7 @@ class TransferProcessingIT {
                         failed -> assertThat(failed.reason()).isEqualTo(FailureReason.INSUFFICIENT_FUNDS));
         assertThat(balance(source)).isEqualByComparingTo("10.00");
         assertThat(balance(target)).isEqualByComparingTo("0.00");
+        assertThat(journalOutcomes(request.transferId())).containsExactly("FAILED:INSUFFICIENT_FUNDS");
     }
 
     @Test
@@ -99,6 +105,7 @@ class TransferProcessingIT {
                 .until(() -> results.forTransfer(request.transferId()).size() == 1);
         assertThat(balance(source)).isEqualByComparingTo("60.00");
         assertThat(balance(target)).isEqualByComparingTo("40.00");
+        assertThat(journalOutcomes(request.transferId())).containsExactly("COMPLETED");
     }
 
     /**
@@ -127,6 +134,14 @@ class TransferProcessingIT {
 
         assertThat(total(wallets)).isEqualByComparingTo(totalBefore);
         assertThat(wallets).allSatisfy(id -> assertThat(balance(id)).isNotNegative());
+        assertThat(transferIds).allSatisfy(id -> assertThat(journalOutcomes(id)).hasSize(1));
+    }
+
+    /** Journal entries as "OUTCOME" or "OUTCOME:REASON". */
+    private List<String> journalOutcomes(UUID transferId) {
+        return journal.queryForList("""
+                        SELECT outcome || coalesce(':' || failure_reason, '')
+                        FROM applied_transfers WHERE transfer_id = ?""", String.class, transferId);
     }
 
     private UUID wallet(String balance) {

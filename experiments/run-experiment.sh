@@ -76,6 +76,9 @@ sleep 10   # final Prometheus scrape
 END_TS=$(date +%s)
 
 psql_tx "select status, count(*) from transfers group by status order by status" > "$RUN_DIR/transfers-by-status.txt"
+log "Reconciliation (transaction_db.transfers vs wallet_db.applied_transfers)"
+python3 -I experiments/reconcile.py --json-out "$RUN_DIR/reconciliation.json" \
+  --anomalies-out "$RUN_DIR/anomalies.csv" > /dev/null || log "Reconciliation found inconsistent transfers (see anomalies.csv)"
 python3 -I experiments/collect_results.py \
   --run-dir "$RUN_DIR" --run-id "$RUN_ID" --strategy "$STRATEGY" --rate "$RATE" --duration "$DURATION_SEC" \
   --poll-interval "$OUTBOX_POLL_INTERVAL" --start "$START_TS" --end "$END_TS" \
