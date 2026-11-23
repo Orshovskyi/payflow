@@ -24,6 +24,7 @@
         <module>payflow-chaos</module>
         <module>wallet-service</module>
         <module>transaction-service</module>
+        <module>ledger-service</module>
     </modules>
 
     <properties>

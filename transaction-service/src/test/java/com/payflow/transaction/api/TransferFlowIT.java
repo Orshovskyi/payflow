@@ -1,9 +1,9 @@
 package com.payflow.transaction.api;
 
+import com.payflow.events.FailureReason;
 import com.payflow.events.Topics;
 import com.payflow.events.TransferCompleted;
 import com.payflow.events.TransferFailed;
-import com.payflow.events.TransferFailed.FailureReason;
 import com.payflow.events.TransferRequested;
 import com.payflow.transaction.TestcontainersConfiguration;
 import com.payflow.transaction.api.TransferDtos.CreateTransferRequest;

@@ -1,6 +1,7 @@
 package com.payflow.wallet.transfer;
 
-import com.payflow.wallet.messaging.OutboxTransferResultPublisher;
+import com.payflow.outbox.EventPublisher;
+import com.payflow.outbox.OutboxEventPublisher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,11 +24,11 @@ class TransferProcessingOutboxIT extends TransferProcessingIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private TransferResultPublisher publisher;
+    private EventPublisher publisher;
 
     @Test
     void outboxStrategyIsActive() {
-        assertThat(publisher).isInstanceOf(OutboxTransferResultPublisher.class);
+        assertThat(publisher).isInstanceOf(OutboxEventPublisher.class);
     }
 
     @AfterEach

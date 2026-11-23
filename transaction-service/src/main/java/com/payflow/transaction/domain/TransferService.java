@@ -3,7 +3,6 @@ package com.payflow.transaction.domain;
 import com.payflow.chaos.CrashPoint;
 import com.payflow.events.TransferCompleted;
 import com.payflow.events.TransferFailed;
-import com.payflow.events.TransferRequested;
 import com.payflow.events.TransferResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +10,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -20,25 +18,24 @@ public class TransferService {
     private static final Logger log = LoggerFactory.getLogger(TransferService.class);
 
     private final TransferRepository transferRepository;
-    private final TransferEventPublisher eventPublisher;
+    private final SagaCoordinator coordinator;
     private final TransferMetrics metrics;
     private final CrashPoint crashPoint;
 
-    public TransferService(TransferRepository transferRepository, TransferEventPublisher eventPublisher,
+    public TransferService(TransferRepository transferRepository, SagaCoordinator coordinator,
                            TransferMetrics metrics, CrashPoint crashPoint) {
         this.transferRepository = transferRepository;
-        this.eventPublisher = eventPublisher;
+        this.coordinator = coordinator;
         this.metrics = metrics;
         this.crashPoint = crashPoint;
     }
 
-    /** Saga step 1: record the transfer as PENDING and ask the Wallet Service to execute it. */
+    /** Saga step 1: record the transfer as PENDING and start the saga in the same transaction. */
     @Transactional
     public Transfer create(UUID sourceWalletId, UUID targetWalletId, BigDecimal amount, String currency) {
         Transfer transfer = transferRepository.save(new Transfer(sourceWalletId, targetWalletId, amount, currency));
         crashPoint.afterCommit(); // experiments only: no-op unless armed
-        eventPublisher.publishTransferRequested(new TransferRequested(
-                UUID.randomUUID(), transfer.getId(), sourceWalletId, targetWalletId, amount, currency, Instant.now()));
+        coordinator.start(transfer);
         metrics.transferCreated();
         return transfer;
     }
@@ -49,12 +46,12 @@ public class TransferService {
                 .orElseThrow(() -> new TransferNotFoundException(transferId));
     }
 
-    /** Saga step 3: record the outcome reported by the Wallet Service. Safe to call more than once. */
+    /** Choreography, last step: record the outcome reported by the Wallet Service. Safe to call more than once. */
     @Transactional
     public void handleResult(TransferResult result) {
         Transfer transfer = transferRepository.findById(result.transferId()).orElse(null);
         if (transfer == null) {
-            // Cannot happen while both services share the same history; logged so experiments can spot it.
+            // Cannot happen while the services share the same history; logged so experiments can spot it.
             log.error("Result for unknown transfer {}", result.transferId());
             return;
         }
@@ -63,7 +60,7 @@ public class TransferService {
             case TransferFailed failed -> transfer.fail(failed.reason().name());
         };
         if (changed) {
-            metrics.transferFinished(transfer.getStatus().name(), transfer.getCreatedAt());
+            metrics.transferFinished(transfer);
         } else {
             metrics.duplicateResultIgnored();
             log.info("Ignored repeated result {} for transfer {} in status {}",

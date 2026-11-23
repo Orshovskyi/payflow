@@ -2,3 +2,4 @@
 **
 !wallet-service/target/wallet-service-*.jar
 !transaction-service/target/transaction-service-*.jar
+!ledger-service/target/ledger-service-*.jar

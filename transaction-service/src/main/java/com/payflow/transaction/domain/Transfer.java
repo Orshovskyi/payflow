@@ -19,6 +19,7 @@ import java.util.UUID;
  * A money transfer and, at the same time, the state of its saga instance.
  * Status only moves forward: PENDING -> COMPLETED | FAILED. Repeated outcomes are ignored,
  * which makes result handling idempotent without a separate deduplication table.
+ * With orchestration the transfer also records the saga step ({@link SagaStep}); with choreography it stays null.
  */
 @Entity
 @Table(name = "transfers")
@@ -45,6 +46,10 @@ public class Transfer {
 
     @Column(name = "failure_reason")
     private String failureReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "saga_step", length = 20)
+    private SagaStep sagaStep;
 
     @Version
     private Long version;
@@ -93,6 +98,33 @@ public class Transfer {
         return true;
     }
 
+    /** Orchestration: the saga starts by reserving the funds. */
+    public void startOrchestration() {
+        sagaStep = SagaStep.RESERVING;
+    }
+
+    /**
+     * Orchestration: moves to the next step only from the expected one.
+     *
+     * @return false for a duplicate or out-of-order reply, which must then be ignored
+     */
+    public boolean advance(SagaStep expected, SagaStep next) {
+        if (status.isTerminal() || sagaStep != expected) {
+            return false;
+        }
+        sagaStep = next;
+        return true;
+    }
+
+    /** Orchestration: the Ledger Service rejected; remember why while the funds are being released. */
+    public boolean startCompensation(String reason) {
+        if (!advance(SagaStep.POSTING, SagaStep.RELEASING)) {
+            return false;
+        }
+        failureReason = reason;
+        return true;
+    }
+
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();
@@ -126,6 +158,10 @@ public class Transfer {
 
     public TransferStatus getStatus() {
         return status;
+    }
+
+    public SagaStep getSagaStep() {
+        return sagaStep;
     }
 
     public String getFailureReason() {

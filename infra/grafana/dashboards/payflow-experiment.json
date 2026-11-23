@@ -1,6 +1,6 @@
 {
   "uid": "payflow-experiment",
-  "title": "PayFlow \u00b7 Experiment",
+  "title": "PayFlow · Experiment",
   "tags": [
     "payflow"
   ],
@@ -57,7 +57,7 @@
             "uid": "prometheus"
           },
           "expr": "sum by (strategy) (rate(payflow_transfers_requested_total[$__rate_interval]))",
-          "legendFormat": "requested \u00b7 {{strategy}}",
+          "legendFormat": "requested · {{strategy}}",
           "refId": "A"
         },
         {
@@ -65,8 +65,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (strategy, outcome) (rate(payflow_transfers_e2e_seconds_count[$__rate_interval]))",
-          "legendFormat": "finished {{outcome}} \u00b7 {{strategy}}",
+          "expr": "sum by (coordination, outcome) (rate(payflow_transfers_e2e_seconds_count[$__rate_interval]))",
+          "legendFormat": "finished {{outcome}} · {{coordination}}",
           "refId": "B"
         }
       ]
@@ -116,7 +116,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.5, sum by (le, strategy) (rate(payflow_transfers_e2e_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p50 \u00b7 {{strategy}}",
+          "legendFormat": "p50 · {{strategy}}",
           "refId": "A"
         },
         {
@@ -125,7 +125,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.95, sum by (le, strategy) (rate(payflow_transfers_e2e_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p95 \u00b7 {{strategy}}",
+          "legendFormat": "p95 · {{strategy}}",
           "refId": "B"
         },
         {
@@ -134,7 +134,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.99, sum by (le, strategy) (rate(payflow_transfers_e2e_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p99 \u00b7 {{strategy}}",
+          "legendFormat": "p99 · {{strategy}}",
           "refId": "C"
         }
       ]
@@ -243,7 +243,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.99, sum by (le, application) (rate(payflow_outbox_lag_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "lag p99 \u00b7 {{application}}",
+          "legendFormat": "lag p99 · {{application}}",
           "refId": "A"
         },
         {
@@ -252,7 +252,7 @@
             "uid": "prometheus"
           },
           "expr": "sum by (application) (payflow_outbox_pending)",
-          "legendFormat": "pending \u00b7 {{application}}",
+          "legendFormat": "pending · {{application}}",
           "refId": "B"
         }
       ]
@@ -302,7 +302,7 @@
             "uid": "prometheus"
           },
           "expr": "sum by (application) (rate(payflow_events_publish_failed_total[$__rate_interval]))",
-          "legendFormat": "naive publish failed \u00b7 {{application}}",
+          "legendFormat": "naive publish failed · {{application}}",
           "refId": "A"
         },
         {
@@ -311,7 +311,7 @@
             "uid": "prometheus"
           },
           "expr": "sum by (application) (rate(payflow_outbox_relay_failures_total[$__rate_interval]))",
-          "legendFormat": "outbox relay failed \u00b7 {{application}}",
+          "legendFormat": "outbox relay failed · {{application}}",
           "refId": "B"
         },
         {
@@ -436,7 +436,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Wallet processing rate",
+      "title": "Wallet saga steps (reserve / capture / release)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -478,8 +478,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (outcome) (rate(payflow_wallet_transfers_processed_total[$__rate_interval]))",
-          "legendFormat": "{{outcome}}",
+          "expr": "sum by (action, outcome) (rate(payflow_wallet_saga_steps_total[$__rate_interval]))",
+          "legendFormat": "{{action}} {{outcome}}",
           "refId": "A"
         }
       ]

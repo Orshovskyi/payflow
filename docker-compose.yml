@@ -1,7 +1,8 @@
 # PayFlow environment.
 #   docker compose up -d                  infrastructure only (run the services from the IDE)
 #   docker compose --profile app up -d    infrastructure + services in containers (experiments)
-# Experiment parameters come from environment variables: STRATEGY (naive|outbox), OUTBOX_POLL_INTERVAL.
+# Experiment parameters come from environment variables: STRATEGY (naive|outbox),
+# COORDINATION (choreography|orchestration), OUTBOX_POLL_INTERVAL, CHAOS_ENABLED.
 # Resource limits are fixed so that every run gets exactly the same CPU and memory.
 name: payflow
 
@@ -76,6 +77,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet_db
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       PAYFLOW_CONSISTENCY_STRATEGY: ${STRATEGY:-naive}
+      PAYFLOW_SAGA_COORDINATION: ${COORDINATION:-choreography}
       PAYFLOW_OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-50ms}
       PAYFLOW_CHAOS_ENABLED: ${CHAOS_ENABLED:-false}
     ports:
@@ -94,6 +96,21 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/transaction_db
     ports:
       - "8082:8082"
+
+  ledger-service:
+    <<: *service
+    image: payflow/ledger-service:latest
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        MODULE: ledger-service
+    environment:
+      <<: *service-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ledger_db
+      PAYFLOW_LEDGER_MAX_TRANSFER_AMOUNT: ${LEDGER_MAX_TRANSFER_AMOUNT:-9}
+    ports:
+      - "8083:8083"
 
   prometheus:
     image: prom/prometheus:v3.5.0

@@ -1,7 +1,9 @@
-"""Reconciliation: compares what the Transaction Service believes (transaction_db.transfers) with what the Wallet
-Service actually did (wallet_db.applied_transfers) and classifies every transfer.
+"""Reconciliation of the three-service saga (ADR-0006, ADR-0008). For every transfer it compares:
+  * what the Transaction Service believes  (transaction_db.transfers: PENDING | COMPLETED | FAILED);
+  * what the Wallet Service did with money (wallet_db.transfer_holds: HELD | CAPTURED | RELEASED | REJECTED);
+  * what the Ledger Service decided         (ledger_db.ledger_transfers: APPROVED | REJECTED).
 
-It runs outside the system under test, reading both databases directly, so the measurement does not depend on
+It runs outside the system under test, reading the databases directly, so the measurement does not depend on
 the services behaving correctly.
 
 Usage:
@@ -16,24 +18,42 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 
-# Categories. Only the first two are correct end states.
+LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
+
+# --- correct end states
+# COMPLETED, money captured to the target, posted in the ledger.
 CONSISTENT_COMPLETED = "consistent_completed"
-CONSISTENT_FAILED = "consistent_failed"
-# Transaction says PENDING, Wallet never saw it: the request event was lost. Money did not move.
+# FAILED by the ledger rule, money returned to the source (compensation done), ledger recorded the rejection.
+CONSISTENT_COMPENSATED = "consistent_compensated"
+# FAILED by the Wallet Service before anything was debited (insufficient funds, unknown wallet...).
+CONSISTENT_REJECTED = "consistent_rejected"
+
+# --- the saga stopped half-way (transfer still PENDING after the drain)
+# Wallet never saw it: the first message was lost. Money did not move.
 LOST_REQUEST = "lost_request"
-# Transaction says PENDING, Wallet applied it: the result event was lost. Money moved, status is wrong.
+# Money left the source wallet and is held, but was neither captured nor released: frozen funds.
+FUNDS_HELD = "funds_held"
+# Money reached the target, but the Transaction Service still says PENDING.
 LOST_RESULT_MONEY_MOVED = "lost_result_money_moved"
-# Transaction says PENDING, Wallet rejected it (e.g. insufficient funds): result lost, no money moved.
+# Money was returned to the source, but the Transaction Service still says PENDING.
+LOST_RESULT_COMPENSATED = "lost_result_compensated"
+# Wallet rejected it, but the Transaction Service still says PENDING. No money moved.
 LOST_RESULT_REJECTED = "lost_result_rejected"
-# Both sides finished but disagree on the outcome. Must never happen.
+
+# --- must never happen
+# The Wallet Service did the opposite of the Ledger decision (captured a rejected or released an approved transfer).
+COMPENSATION_VIOLATION = "compensation_violation"
+# The services finished the transfer but disagree on how.
 OUTCOME_MISMATCH = "outcome_mismatch"
-# Transaction finished a transfer the Wallet has no record of. Must never happen.
+# The Transaction Service finished a transfer the Wallet Service has no record of.
 FINISHED_WITHOUT_JOURNAL = "finished_without_journal"
-# Wallet applied a transfer the Transaction Service does not know. Must never happen.
+# The Wallet or Ledger Service has a transfer the Transaction Service does not know.
 ORPHAN_JOURNAL = "orphan_journal"
 
-CATEGORIES = [CONSISTENT_COMPLETED, CONSISTENT_FAILED, LOST_REQUEST, LOST_RESULT_MONEY_MOVED,
-              LOST_RESULT_REJECTED, OUTCOME_MISMATCH, FINISHED_WITHOUT_JOURNAL, ORPHAN_JOURNAL]
+CONSISTENT = (CONSISTENT_COMPLETED, CONSISTENT_COMPENSATED, CONSISTENT_REJECTED)
+CATEGORIES = [CONSISTENT_COMPLETED, CONSISTENT_COMPENSATED, CONSISTENT_REJECTED, LOST_REQUEST, FUNDS_HELD,
+              LOST_RESULT_MONEY_MOVED, LOST_RESULT_COMPENSATED, LOST_RESULT_REJECTED, COMPENSATION_VIOLATION,
+              OUTCOME_MISMATCH, FINISHED_WITHOUT_JOURNAL, ORPHAN_JOURNAL]
 
 
 @dataclass(frozen=True)
@@ -43,41 +63,56 @@ class Transfer:
 
 
 @dataclass(frozen=True)
-class JournalEntry:
-    outcome: str         # COMPLETED | FAILED
+class Hold:
+    status: str          # HELD | CAPTURED | RELEASED | REJECTED
     failure_reason: str
 
 
-def classify(transfer, entry):
+@dataclass(frozen=True)
+class LedgerRecord:
+    decision: str        # APPROVED | REJECTED
+
+
+def classify(transfer, hold, ledger):
+    if hold and ledger and ((hold.status == "CAPTURED" and ledger.decision == "REJECTED")
+                            or (hold.status == "RELEASED" and ledger.decision == "APPROVED")):
+        return COMPENSATION_VIOLATION
     if transfer is None:
         return ORPHAN_JOURNAL
     if transfer.status == "PENDING":
-        if entry is None:
+        if hold is None:
             return LOST_REQUEST
-        return LOST_RESULT_MONEY_MOVED if entry.outcome == "COMPLETED" else LOST_RESULT_REJECTED
-    if entry is None:
+        return {"HELD": FUNDS_HELD, "CAPTURED": LOST_RESULT_MONEY_MOVED, "RELEASED": LOST_RESULT_COMPENSATED,
+                "REJECTED": LOST_RESULT_REJECTED}[hold.status]
+    if hold is None:
         return FINISHED_WITHOUT_JOURNAL
-    if transfer.status == entry.outcome and transfer.failure_reason == entry.failure_reason:
-        return CONSISTENT_COMPLETED if entry.outcome == "COMPLETED" else CONSISTENT_FAILED
+    decision = ledger.decision if ledger else None
+    if transfer.status == "COMPLETED":
+        return CONSISTENT_COMPLETED if hold.status == "CAPTURED" and decision == "APPROVED" else OUTCOME_MISMATCH
+    if transfer.failure_reason == LIMIT_EXCEEDED:
+        return CONSISTENT_COMPENSATED if hold.status == "RELEASED" and decision == "REJECTED" else OUTCOME_MISMATCH
+    if hold.status == "REJECTED" and hold.failure_reason == transfer.failure_reason and decision is None:
+        return CONSISTENT_REJECTED
     return OUTCOME_MISMATCH
 
 
-def reconcile(transfers, journal):
-    """transfers, journal: dict transfer_id -> Transfer / JournalEntry. Returns (summary, anomalies)."""
+def reconcile(transfers, holds, ledger):
+    """dicts transfer_id -> Transfer / Hold / LedgerRecord. Returns (summary, anomalies)."""
     counts = Counter()
     anomalies = []
-    for transfer_id in sorted(transfers.keys() | journal.keys()):
-        transfer, entry = transfers.get(transfer_id), journal.get(transfer_id)
-        category = classify(transfer, entry)
+    for transfer_id in sorted(transfers.keys() | holds.keys() | ledger.keys()):
+        transfer, hold, record = transfers.get(transfer_id), holds.get(transfer_id), ledger.get(transfer_id)
+        category = classify(transfer, hold, record)
         counts[category] += 1
-        if category not in (CONSISTENT_COMPLETED, CONSISTENT_FAILED):
+        if category not in CONSISTENT:
             anomalies.append({
                 "transfer_id": transfer_id, "category": category,
                 "transaction_status": transfer.status if transfer else "",
-                "wallet_outcome": entry.outcome if entry else "",
+                "wallet_hold": hold.status if hold else "",
+                "ledger_decision": record.decision if record else "",
             })
     total = sum(counts.values())
-    consistent = counts[CONSISTENT_COMPLETED] + counts[CONSISTENT_FAILED]
+    consistent = sum(counts[c] for c in CONSISTENT)
     summary = {category: counts[category] for category in CATEGORIES}
     summary["total"] = total
     summary["inconsistent"] = total - consistent
@@ -96,9 +131,11 @@ def query(database, sql):
 def load():
     transfers = {row[0]: Transfer(row[1], row[2]) for row in query(
         "transaction_db", "SELECT id, status, coalesce(failure_reason, '') FROM transfers")}
-    journal = {row[0]: JournalEntry(row[1], row[2]) for row in query(
-        "wallet_db", "SELECT transfer_id, outcome, coalesce(failure_reason, '') FROM applied_transfers")}
-    return transfers, journal
+    holds = {row[0]: Hold(row[1], row[2]) for row in query(
+        "wallet_db", "SELECT transfer_id, status, coalesce(failure_reason, '') FROM transfer_holds")}
+    ledger = {row[0]: LedgerRecord(row[1]) for row in query(
+        "ledger_db", "SELECT transfer_id, decision FROM ledger_transfers")}
+    return transfers, holds, ledger
 
 
 def main():
@@ -113,7 +150,8 @@ def main():
             json.dump(summary, f, indent=2)
     if args.anomalies_out:
         with open(args.anomalies_out, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["transfer_id", "category", "transaction_status", "wallet_outcome"])
+            writer = csv.DictWriter(f, fieldnames=["transfer_id", "category", "transaction_status", "wallet_hold",
+                                                   "ledger_decision"])
             writer.writeheader()
             writer.writerows(anomalies)
     for key, value in summary.items():

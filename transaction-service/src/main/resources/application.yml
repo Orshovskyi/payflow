@@ -2,6 +2,10 @@ server:
   port: 8082
 
 payflow:
+  saga:
+    # choreography = services react to each other's events; orchestration = this service sends commands.
+    # Must be the same in every service. Override with PAYFLOW_SAGA_COORDINATION.
+    coordination: choreography
   consistency:
     # naive = dual write (baseline); outbox = transactional outbox. Override with PAYFLOW_CONSISTENCY_STRATEGY.
     strategy: naive

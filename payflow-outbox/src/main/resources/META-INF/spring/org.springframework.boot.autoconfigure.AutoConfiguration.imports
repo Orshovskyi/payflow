@@ -1,1 +1,2 @@
 com.payflow.outbox.OutboxAutoConfiguration
+com.payflow.outbox.MessagingAutoConfiguration

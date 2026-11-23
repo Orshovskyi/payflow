@@ -2,11 +2,12 @@
 # One reproducible experiment run: clean stack -> warm-up -> measured load -> drain -> collect results.
 #
 # Usage:  experiments/run-experiment.sh <naive|outbox> [rate] [durationSec]
-# Env:    OUTBOX_POLL_INTERVAL (default 50ms), WALLETS (100), WARMUP_RATE (20), WARMUP_SEC (20),
+# Env:    COORDINATION (choreography | orchestration, default choreography; ADR-0008),
+#         OUTBOX_POLL_INTERVAL (default 50ms), WALLETS (100), WARMUP_RATE (20), WARMUP_SEC (20),
 #         DRAIN_TIMEOUT_SEC (60), LABEL (free text stored with the results), BUILD=1 (rebuild jars and images first)
 # Chaos:  CHAOS_MODE      none | kill (docker kill -s KILL at an arbitrary moment)
 #                         | crash-after-commit (process halts right after the next business commit)
-#         CHAOS_TARGET    wallet-service | transaction-service
+#         CHAOS_TARGET    wallet-service | transaction-service | ledger-service
 #         CHAOS_EVENTS (3), CHAOS_FIRST_AT (20 s after the measured load starts), CHAOS_INTERVAL (30 s)
 #
 # Every run starts from an empty database and a fresh Kafka broker, so runs do not influence each other.
@@ -15,6 +16,7 @@ set -euo pipefail
 STRATEGY=${1:?usage: run-experiment.sh <naive|outbox> [rate] [durationSec]}
 RATE=${2:-50}
 DURATION_SEC=${3:-120}
+COORDINATION=${COORDINATION:-choreography}
 OUTBOX_POLL_INTERVAL=${OUTBOX_POLL_INTERVAL:-50ms}
 WALLETS=${WALLETS:-100}
 WARMUP_RATE=${WARMUP_RATE:-20}
@@ -28,13 +30,15 @@ CHAOS_INTERVAL=${CHAOS_INTERVAL:-30}
 INITIAL_BALANCE=1000000
 
 case "$STRATEGY" in naive|outbox) ;; *) echo "strategy must be naive or outbox" >&2; exit 2 ;; esac
+case "$COORDINATION" in choreography|orchestration) ;; *) echo "COORDINATION must be choreography or orchestration" >&2; exit 2 ;; esac
 case "$CHAOS_MODE" in none|kill|crash-after-commit) ;; *) echo "CHAOS_MODE must be none, kill or crash-after-commit" >&2; exit 2 ;; esac
 case "$CHAOS_TARGET" in wallet-service) CHAOS_PORT=8081 ;; transaction-service) CHAOS_PORT=8082 ;;
-  *) echo "CHAOS_TARGET must be wallet-service or transaction-service" >&2; exit 2 ;; esac
+  ledger-service) CHAOS_PORT=8083 ;;
+  *) echo "CHAOS_TARGET must be wallet-service, transaction-service or ledger-service" >&2; exit 2 ;; esac
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
-RUN_ID="$(date +%Y%m%d-%H%M%S)_${STRATEGY}_r${RATE}"
+RUN_ID="$(date +%Y%m%d-%H%M%S)_${COORDINATION:0:5}_${STRATEGY}_r${RATE}"
 [ "$STRATEGY" = outbox ] && RUN_ID="${RUN_ID}_poll${OUTBOX_POLL_INTERVAL}"
 [ "$CHAOS_MODE" != none ] && RUN_ID="${RUN_ID}_${CHAOS_MODE}-${CHAOS_TARGET%-service}"
 RUN_DIR="experiments/results/$RUN_ID"
@@ -42,6 +46,8 @@ mkdir -p "$RUN_DIR"
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$RUN_DIR/run.log"; }
 psql_tx() { docker compose exec -T postgres psql -U payflow -d transaction_db -tAc "$1"; }
 psql_wallet() { docker compose exec -T postgres psql -U payflow -d wallet_db -tAc "$1"; }
+# All money in the system: wallet balances plus amounts held by unfinished transfers (ADR-0008).
+TOTAL_MONEY_SQL="select (select coalesce(sum(balance),0) from wallets) + (select coalesce(sum(amount),0) from transfer_holds where status='HELD')"
 # gatling <log file> <rate> <durationSec> <wallets>; copies the HTML report next to the log
 gatling() {
   local status=0
@@ -66,7 +72,8 @@ chaos_loop() {
   for i in $(seq 1 "$CHAOS_EVENTS"); do
     local started down_at up_at
     started=$(date +%s)
-    case "$CHAOS_MODE" in
+    case "$COORDINATION" in choreography|orchestration) ;; *) echo "COORDINATION must be choreography or orchestration" >&2; exit 2 ;; esac
+case "$CHAOS_MODE" in
       kill) docker compose --profile app kill -s KILL "$CHAOS_TARGET" >/dev/null 2>&1 || true ;;
       # The response may never arrive: another thread can commit and halt the process first.
       # Whether the crash happened is checked below by watching the container.
@@ -94,16 +101,13 @@ if [ "${BUILD:-0}" = 1 ]; then
   docker compose --profile app build -q
 fi
 
-log "Run $RUN_ID: strategy=$STRATEGY rate=$RATE/s duration=${DURATION_SEC}s poll=$OUTBOX_POLL_INTERVAL chaos=$CHAOS_MODE"
+log "Run $RUN_ID: coordination=$COORDINATION strategy=$STRATEGY rate=$RATE/s duration=${DURATION_SEC}s poll=$OUTBOX_POLL_INTERVAL chaos=$CHAOS_MODE"
 log "Resetting the stack (database volumes, Kafka, metrics)"
 docker compose --profile app down -v --remove-orphans >/dev/null 2>&1
 CHAOS_ENABLED=$([ "$CHAOS_MODE" = crash-after-commit ] && echo true || echo false)
-STRATEGY=$STRATEGY OUTBOX_POLL_INTERVAL=$OUTBOX_POLL_INTERVAL CHAOS_ENABLED=$CHAOS_ENABLED \
-  docker compose --profile app up -d --wait >/dev/null 2>&1 || \
-  STRATEGY=$STRATEGY OUTBOX_POLL_INTERVAL=$OUTBOX_POLL_INTERVAL CHAOS_ENABLED=$CHAOS_ENABLED \
-  docker compose --profile app up -d >/dev/null
-export STRATEGY OUTBOX_POLL_INTERVAL CHAOS_ENABLED   # `docker compose start` after a crash keeps the same settings
-for port in 8081 8082; do
+export STRATEGY COORDINATION OUTBOX_POLL_INTERVAL CHAOS_ENABLED   # also used by `docker compose start` after a crash
+docker compose --profile app up -d --wait >/dev/null 2>&1 || docker compose --profile app up -d >/dev/null
+for port in 8081 8082 8083; do
   wait_healthy "$port" 90 || { log "Service on :$port did not start"; exit 1; }
 done
 
@@ -112,7 +116,7 @@ gatling "$RUN_DIR/warmup.log" "$WARMUP_RATE" "$WARMUP_SEC" 10 || log "Warm-up re
 for _ in $(seq 1 "$DRAIN_TIMEOUT_SEC"); do [ "$(psql_tx "select count(*) from transfers where status='PENDING'")" = 0 ] && break; sleep 1; done
 sleep 10   # let at least one Prometheus scrape pass, so the measured window starts clean
 
-TOTAL_BEFORE=$(psql_wallet "select coalesce(sum(balance),0) from wallets")
+TOTAL_BEFORE=$(psql_wallet "$TOTAL_MONEY_SQL")
 START_TS=$(date +%s)
 log "Measured load: ${RATE}/s for ${DURATION_SEC}s"
 CHAOS_PID=""
@@ -139,13 +143,14 @@ sleep 10   # final Prometheus scrape
 END_TS=$(date +%s)
 
 psql_tx "select status, count(*) from transfers group by status order by status" > "$RUN_DIR/transfers-by-status.txt"
-log "Reconciliation (transaction_db.transfers vs wallet_db.applied_transfers)"
+log "Reconciliation (transaction_db.transfers vs wallet_db.transfer_holds vs ledger_db.ledger_transfers)"
 python3 -I experiments/reconcile.py --json-out "$RUN_DIR/reconciliation.json" \
   --anomalies-out "$RUN_DIR/anomalies.csv" > /dev/null || log "Reconciliation found inconsistent transfers (see anomalies.csv)"
 python3 -I experiments/collect_results.py \
-  --run-dir "$RUN_DIR" --run-id "$RUN_ID" --strategy "$STRATEGY" --rate "$RATE" --duration "$DURATION_SEC" \
+  --run-dir "$RUN_DIR" --run-id "$RUN_ID" --coordination "$COORDINATION" --strategy "$STRATEGY" --rate "$RATE" --duration "$DURATION_SEC" \
   --poll-interval "$OUTBOX_POLL_INTERVAL" --start "$START_TS" --end "$END_TS" \
-  --total-before "$TOTAL_BEFORE" --total-after "$(psql_wallet "select coalesce(sum(balance),0) from wallets")" \
+  --total-before "$TOTAL_BEFORE" --total-after "$(psql_wallet "$TOTAL_MONEY_SQL")" \
+  --held-after "$(psql_wallet "select count(*) from transfer_holds where status='HELD'")" \
   --new-money "$((WALLETS * INITIAL_BALANCE))" \
   --pending "$(psql_tx "select count(*) from transfers where status='PENDING'")" \
   --commit "$(git rev-parse --short HEAD)$(git diff --quiet || echo '-dirty')" --label "${LABEL:-}" \

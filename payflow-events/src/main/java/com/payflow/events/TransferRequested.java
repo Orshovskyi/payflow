@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Asks the Wallet Service to move money between two wallets.
+ * Choreography: a new transfer was created; the Wallet Service reacts by reserving the funds.
  *
  * @param eventId unique per event; consumers use it for deduplication (at-least-once delivery)
  */
@@ -16,5 +16,5 @@ public record TransferRequested(
         UUID targetWalletId,
         BigDecimal amount,
         String currency,
-        Instant occurredAt) {
+        Instant occurredAt) implements SagaMessage {
 }

@@ -32,6 +32,11 @@ public class OutboxAutoConfiguration {
     }
 
     @Bean
+    EventPublisher outboxEventPublisher(OutboxWriter outboxWriter, MeterRegistry meterRegistry) {
+        return new OutboxEventPublisher(outboxWriter, meterRegistry);
+    }
+
+    @Bean
     OutboxRelay outboxRelay(JdbcTemplate jdbcTemplate, PlatformTransactionManager transactionManager,
                             ProducerFactory<?, ?> producerFactory, OutboxProperties properties,
                             MeterRegistry meterRegistry) {

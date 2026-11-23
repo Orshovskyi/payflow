@@ -1,8 +1,11 @@
-"""Collects the results of one experiment run into summary.json and appends a row to results/summary.csv.
+"""Collects the results of one experiment run into summary.json and appends a row to results/summary-v2.csv.
+
+summary-v2.csv holds runs of the three-service saga (ADR-0008). summary.csv keeps the earlier two-service series
+(commit e5d0573); the columns differ, so the two files are not mixed.
 
 Sources:
   * database (passed in by the shell script) - exact counts and the money-conservation invariant;
-  * reconciliation.json (written by reconcile.py) - per-transfer consistency between the two services;
+  * reconciliation.json (written by reconcile.py) - per-transfer consistency between the three services;
   * Prometheus - end-to-end saga latency percentiles and anomaly counters over the measured window;
   * Gatling console summary (gatling.log) - HTTP latency percentiles, throughput and errors as seen by the client.
     Gatling 3.12+ no longer writes stats.json and its simulation.log is binary, so the printed summary is parsed.
@@ -17,6 +20,7 @@ import urllib.request
 from decimal import Decimal
 
 PROMETHEUS = "http://localhost:9090"
+RESULTS_FILE = "summary-v2.csv"
 
 
 def prom(query, at):
@@ -76,10 +80,11 @@ def reconciliation(run_dir):
 
 def main():
     p = argparse.ArgumentParser()
-    for name in ["run-dir", "run-id", "strategy", "rate", "duration", "poll-interval", "start", "end",
+    for name in ["run-dir", "run-id", "coordination", "strategy", "rate", "duration", "poll-interval", "start", "end",
                  "total-before", "total-after", "new-money", "pending", "commit", "label", "gatling-exit",
-                 "chaos-mode", "chaos-target", "chaos-events-done"]:
-        p.add_argument("--" + name, required=name not in ("label", "chaos-mode", "chaos-target", "chaos-events-done"),
+                 "chaos-mode", "chaos-target", "chaos-events-done", "held-after"]:
+        p.add_argument("--" + name, required=name not in ("label", "chaos-mode", "chaos-target", "chaos-events-done",
+                                                          "held-after"),
                        default="")
     a = p.parse_args()
 
@@ -89,10 +94,13 @@ def main():
     def quantile(q, metric, selector=""):
         return prom(f"histogram_quantile({q}, sum by (le) (increase({metric}{selector}[{window}])))", a.end)
 
-    def increase(metric):
+    def increase(metric, selector=""):
         # Counters are registered lazily: a series that never appeared means the event never happened.
-        value = prom(f"sum(increase({metric}[{window}]))", a.end)
+        value = prom(f"sum(increase({metric}{selector}[{window}]))", a.end)
         return 0 if value is None else round(value)
+
+    finished = increase("payflow_transfers_e2e_seconds_count")
+    published = increase("payflow_events_published_total")
 
     expected_total = Decimal(a.total_before) + Decimal(a.new_money)
     statuses = {}
@@ -104,7 +112,7 @@ def main():
 
     summary = {
         "run_id": a.run_id, "commit": a.commit, "label": a.label,
-        "strategy": a.strategy, "outbox_poll_interval": a.poll_interval if a.strategy == "outbox" else "",
+        "coordination": a.coordination, "strategy": a.strategy, "outbox_poll_interval": a.poll_interval if a.strategy == "outbox" else "",
         "chaos_mode": a.chaos_mode or "none",
         "chaos_target": a.chaos_target if a.chaos_mode not in ("", "none") else "",
         "chaos_events": int(a.chaos_events_done or 0),
@@ -114,11 +122,20 @@ def main():
         "e2e_p50_ms": ms(quantile(0.5, e2e)),
         "e2e_p95_ms": ms(quantile(0.95, e2e)),
         "e2e_p99_ms": ms(quantile(0.99, e2e)),
+        # Successful and compensated transfers take different paths through the saga, so they are reported apart.
+        "e2e_completed_p50_ms": ms(quantile(0.5, e2e, '{outcome="COMPLETED"}')),
+        "e2e_completed_p99_ms": ms(quantile(0.99, e2e, '{outcome="COMPLETED"}')),
+        "e2e_compensated_p50_ms": ms(quantile(0.5, e2e, '{outcome="COMPENSATED"}')),
+        "e2e_compensated_p99_ms": ms(quantile(0.99, e2e, '{outcome="COMPENSATED"}')),
+        "transfers_finished_in_window": finished,
+        # Saga messages published per finished transfer (orchestration sends commands and replies).
+        "messages_per_transfer": round(published / finished, 2) if finished else None,
         "outbox_lag_p99_ms": ms(quantile(0.99, "payflow_outbox_lag_seconds_bucket")),
         # Totals over all runs of this stack (warm-up included): exact values from the database.
         "transfers_completed": statuses.get("COMPLETED", 0),
         "transfers_failed": statuses.get("FAILED", 0),
         "transfers_pending_after_drain": int(a.pending),
+        "holds_left_held": int(a.held_after or 0),
         "money_conserved": Decimal(a.total_after) == expected_total,
         **reconciliation(a.run_dir),
         "total_balance_expected": str(expected_total), "total_balance_actual": a.total_after,
@@ -126,12 +143,13 @@ def main():
         "naive_publish_failures": increase("payflow_events_publish_failed_total"),
         "outbox_relay_failures": increase("payflow_outbox_relay_failures_total"),
         "duplicate_requests_skipped": increase("payflow_wallet_duplicates_skipped_total"),
+        "ledger_duplicates_skipped": increase("payflow_ledger_duplicates_skipped_total"),
         "duplicate_results_ignored": increase("payflow_transfers_duplicate_results_total"),
     }
     with open(os.path.join(a.run_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2, default=str)
 
-    csv_path = os.path.join(os.path.dirname(a.run_dir.rstrip("/")), "summary.csv")
+    csv_path = os.path.join(os.path.dirname(a.run_dir.rstrip("/")), RESULTS_FILE)
     new_file = not os.path.exists(csv_path)
     with open(csv_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(summary))

@@ -8,10 +8,4 @@ import java.util.UUID;
  */
 public record TransferFailed(UUID eventId, UUID transferId, FailureReason reason, Instant occurredAt)
         implements TransferResult {
-
-    public enum FailureReason {
-        INSUFFICIENT_FUNDS,
-        WALLET_NOT_FOUND,
-        CURRENCY_MISMATCH
-    }
 }

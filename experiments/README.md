@@ -4,9 +4,11 @@
 
 ## Один прогін
 ```bash
-BUILD=1 experiments/run-experiment.sh naive 50 120     # стратегія, переказів/с, тривалість сталого навантаження (с)
+BUILD=1 experiments/run-experiment.sh outbox 50 120    # стратегія доставки, переказів/с, тривалість сталого навантаження (с)
+COORDINATION=orchestration experiments/run-experiment.sh outbox 50 120
 OUTBOX_POLL_INTERVAL=10ms experiments/run-experiment.sh outbox 50 120
 ```
+`COORDINATION` — `choreography` (за замовчуванням) або `orchestration` (ADR-0008).
 `BUILD=1` збирає jar-файли й образи; потрібен після кожної зміни коду. `LABEL="..."` додає довільну позначку до
 рядка результатів.
 
@@ -17,7 +19,7 @@ CHAOS_MODE=crash-after-commit CHAOS_TARGET=wallet-service experiments/run-experi
 CHAOS_MODE=kill CHAOS_TARGET=transaction-service experiments/run-experiment.sh naive 50 100
 ```
 - `CHAOS_MODE`: `kill` (SIGKILL у довільний момент) або `crash-after-commit` (падіння одразу після commit).
-- `CHAOS_TARGET`: `wallet-service` або `transaction-service`.
+- `CHAOS_TARGET`: `wallet-service`, `transaction-service` або `ledger-service`.
 - `CHAOS_EVENTS` (3), `CHAOS_FIRST_AT` (20 с від початку заміру), `CHAOS_INTERVAL` (30 с).
 
 Тривалість заміру має покривати всі події: `CHAOS_FIRST_AT + (CHAOS_EVENTS − 1) × CHAOS_INTERVAL` плюс ~15 с
@@ -33,8 +35,10 @@ python3 -m unittest discover -s experiments      # тести класифіка
 автоматично після зливу.
 
 ## Результати
-- `results/summary.csv` — по рядку на прогін: HTTP-затримки (Gatling), наскрізна затримка саги, лаг outbox,
-  кількість переказів, перевірка інваріанту, аномалії, результати звірки (`recon_*`).
+- `results/summary-v2.csv` — по рядку на прогін трисервісної саги (ADR-0008); `results/summary.csv` — серія
+  `series-20261112` двосервісної версії (коміт `e5d0573`). Колонки: координація, стратегія, HTTP-затримки (Gatling),
+  наскрізна затримка саги (окремо для успішних і компенсованих переказів), лаг outbox, повідомлень на переказ,
+  кількість переказів, інваріант грошей, заморожені утримання, аномалії, результати звірки (`recon_*`).
 - `results/<run-id>/anomalies.csv` — перелік переказів із розбіжностями та їхні категорії.
 - `results/<run-id>/` — `summary.json`, логи, HTML-звіти Gatling (`gatling-report/index.html`). У git не
   зберігаються.

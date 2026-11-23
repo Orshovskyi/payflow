@@ -1,5 +1,6 @@
 package com.payflow.wallet.domain;
 
+import com.payflow.wallet.transfer.TransferHolds;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -10,9 +11,11 @@ import java.util.UUID;
 public class WalletService {
 
     private final WalletRepository walletRepository;
+    private final TransferHolds holds;
 
-    public WalletService(WalletRepository walletRepository) {
+    public WalletService(WalletRepository walletRepository, TransferHolds holds) {
         this.walletRepository = walletRepository;
+        this.holds = holds;
     }
 
     @Transactional
@@ -26,8 +29,9 @@ public class WalletService {
                 .orElseThrow(() -> new WalletNotFoundException(walletId));
     }
 
+    /** All money in the system: wallet balances plus amounts held by unfinished transfers (ADR-0008). */
     @Transactional(readOnly = true)
     public BigDecimal totalBalance() {
-        return walletRepository.totalBalance();
+        return walletRepository.totalBalance().add(holds.heldTotal());
     }
 }

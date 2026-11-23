@@ -1,0 +1,21 @@
+package com.payflow.ledger.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.ExponentialBackOff;
+
+/** Topics are declared by the shared messaging auto-configuration (payflow-outbox). */
+@Configuration(proxyBeanMethods = false)
+public class KafkaConfig {
+
+    /** Transient failures (e.g. optimistic lock conflicts) are retried by re-delivering the record. */
+    @Bean
+    DefaultErrorHandler kafkaErrorHandler() {
+        var backOff = new ExponentialBackOff(20, 2.0);
+        backOff.setMaxInterval(1_000);
+        // When retries are exhausted the record is logged and skipped: in the experiment that counts as a lost transfer.
+        backOff.setMaxElapsedTime(30_000);
+        return new DefaultErrorHandler(backOff);
+    }
+}

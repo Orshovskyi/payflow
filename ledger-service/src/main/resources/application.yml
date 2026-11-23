@@ -1,0 +1,65 @@
+server:
+  port: 8083
+
+payflow:
+  saga:
+    # choreography = services react to each other's events; orchestration = the Transaction Service sends commands.
+    # Must be the same in every service. Override with PAYFLOW_SAGA_COORDINATION.
+    coordination: choreography
+  consistency:
+    # naive = dual write (baseline); outbox = transactional outbox. Override with PAYFLOW_CONSISTENCY_STRATEGY.
+    strategy: naive
+  ledger:
+    # Ledger rule (ADR-0008): a single transfer above this amount is rejected and the saga compensates.
+    max-transfer-amount: 9
+  outbox:
+    poll-interval: 50ms
+    batch-size: 100
+    send-timeout: 10s
+    retention: 1h
+
+spring:
+  application:
+    name: ledger-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ledger_db
+    username: payflow
+    password: payflow
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        enable.idempotence: true
+        spring.json.add.type.headers: false
+    consumer:
+      group-id: ${spring.application.name}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: com.payflow.events
+        spring.json.use.type.headers: false
+        # Default is 45 s: after a crash the partitions of the dead consumer stay blocked that long.
+        # 6 s is the broker minimum; it applies to both strategies, so it shortens recovery without biasing them.
+        session.timeout.ms: 6000
+        heartbeat.interval.ms: 2000
+    listener:
+      concurrency: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

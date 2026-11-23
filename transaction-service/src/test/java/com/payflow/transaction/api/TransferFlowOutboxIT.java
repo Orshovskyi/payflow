@@ -1,7 +1,7 @@
 package com.payflow.transaction.api;
 
-import com.payflow.transaction.domain.TransferEventPublisher;
-import com.payflow.transaction.messaging.OutboxTransferEventPublisher;
+import com.payflow.outbox.EventPublisher;
+import com.payflow.outbox.OutboxEventPublisher;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.TestPropertySource;
@@ -15,10 +15,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TransferFlowOutboxIT extends TransferFlowIT {
 
     @Autowired
-    private TransferEventPublisher publisher;
+    private EventPublisher publisher;
 
     @Test
     void outboxStrategyIsActive() {
-        assertThat(publisher).isInstanceOf(OutboxTransferEventPublisher.class);
+        assertThat(publisher).isInstanceOf(OutboxEventPublisher.class);
     }
 }
