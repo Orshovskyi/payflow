@@ -88,13 +88,16 @@ def main():
            table(["Сценарій", "Координація", "n", "Відмов усього", "Розбіжності"] + [n for _, n in LOSS_COLUMNS]
                  + ["Гроші збережено", "HTTP-помилки", "Сага p99, мс"], rows), ""]
 
-    present = [(k, n) for k, n in CHAOS if any(f"{k}-{s}" in groups for s, _, _ in STYLES)]
+    # The naive run is the control group: with outbox every bar is expected to be zero, which alone says little.
+    present = [(k, n) for k, n in CHAOS + [("naive-crash-wallet", "naive: збій Wallet\nпісля commit")]
+               if any(f"{k}-{s}" in groups for s, _, _ in STYLES)]
     if present:
         fig, ax = plt.subplots(figsize=(8, 4.2))
         total_bars(ax, [n for _, n in present], [
             (name, color, [total(groups[f"{k}-{key}"], "recon_inconsistent") if f"{k}-{key}" in groups else None
                            for k, _ in present]) for key, name, color in STYLES])
-        style(ax, "Розбіжні перекази після відмов (outbox)", "переказів, сума за всі повтори")
+        ax.set_ylim(bottom=0, top=max(ax.get_ylim()[1], 1))
+        style(ax, "Розбіжні перекази після відмов: outbox і naive", "переказів, сума за всі повтори")
         fig.tight_layout()
         fig.savefig(os.path.join(figures, "saga-chaos.png"), dpi=200)
         md += ["![Розбіжності після відмов](figures/saga-chaos.png)", ""]
